@@ -175,7 +175,7 @@ function ApiCache() {
     }
   }
 
-  function makeResponseCacheable(req, res, next, key, duration, strDuration, toggle) {
+  function makeResponseCacheable(req, res, next, key, duration, strDuration, toggle, redis, perf) {
     // monkeypatch res.end to create cache object
     res._apicache = {
       write: res.write,
@@ -213,9 +213,15 @@ function ApiCache() {
     // patch res.end
     res.end = function(content, encoding) {
       if (shouldCacheResponse(req, res, toggle)) {
+        var cached = redis ? null : memCache.getValue(key)
+
+        if (!cached) {
+          perf.miss(key)
+        }
+
         accumulateContent(res, content)
 
-        if (res._apicache.cacheable && res._apicache.content) {
+        if (!cached && res._apicache.cacheable && res._apicache.content) {
           addIndexEntries(key, req)
           var headers = res._apicache.headers || getSafeHeaders(res)
           var cacheObject = createCacheObject(
@@ -669,18 +675,38 @@ function ApiCache() {
                 key,
                 duration,
                 strDuration,
-                middlewareToggle
+                middlewareToggle,
+                redis,
+                perf
               )
             }
           })
         } catch (err) {
           // bypass redis on error
-          perf.miss(key)
-          return makeResponseCacheable(req, res, next, key, duration, strDuration, middlewareToggle)
+          return makeResponseCacheable(
+            req,
+            res,
+            next,
+            key,
+            duration,
+            strDuration,
+            middlewareToggle,
+            redis,
+            perf
+          )
         }
       } else {
-        perf.miss(key)
-        return makeResponseCacheable(req, res, next, key, duration, strDuration, middlewareToggle)
+        return makeResponseCacheable(
+          req,
+          res,
+          next,
+          key,
+          duration,
+          strDuration,
+          middlewareToggle,
+          redis,
+          perf
+        )
       }
     }
 
